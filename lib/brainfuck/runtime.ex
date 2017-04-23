@@ -10,7 +10,7 @@ defmodule Brainfuck.Runtime do
 
   defstruct registry: %Registry{}, io: %IO{}
 
-  @type exit_reason :: :no_input | :open_loop | :unknown_token | :unexpected_loop_end
+  @type exit_reason :: :no_input | :open_loop | :unexpected_loop_end
 
   @inc_ptr ?>
   @dec_ptr ?<
@@ -23,7 +23,8 @@ defmodule Brainfuck.Runtime do
 
   @doc ~S"""
   Start executing the given program asynchronously, (optionally) with the given input. 
-  
+  The program will run on a linked process.
+
   Returns a `Task` that's executing the program. 
 
   The result of the `Task` would be either
@@ -36,19 +37,58 @@ defmodule Brainfuck.Runtime do
 
   ## Examples
 
-      iex> Task.await(Brainfuck.Runtime.start_program(",>,.<.", "IO"))
+      iex> Task.await(Brainfuck.Runtime.start_program_linked(",>,.<.", "IO"))
       {:exit_success, 'OI'}
 
-      iex> Task.await(Brainfuck.Runtime.start_program(",."))
-      {:exit_failure, :no_input}
+      iex> Task.await(Brainfuck.Runtime.start_program_linked(">]."))
+      {:exit_failure, :unexpected_loop_end}
 
   """
-  def start_program(program, input \\ nil) do
+  def start_program_linked(program, input \\ nil) do
     Task.Supervisor.async(Brainfuck.TaskSupervisor, fn -> 
       main String.to_charlist(program), %Runtime{io: IO.set_input(%IO{}, input)}
     end)
   end
   
+  @doc ~S"""
+  Similar to `start_program_linked(program, input \\ nil)`.
+  Start executing the given program asynchronously, (optionally) with the given input.
+  The program will run on a process that's only linked to a `Task.Supervisor`.
+  When the program halts, the given `callback` will be invoked with the execution result.
+
+  The program execution result would be either
+  
+      {:exit_success, outputs :: charlist}
+  
+  or
+  
+      {:exit_failure, reason :: exit_reason}
+
+  ## Examples
+
+      iex> this = self()
+      iex> Brainfuck.Runtime.start_program(",>,.<.", "IO", fn state -> send this, state end)
+      iex> receive do
+      ...>   state ->
+      ...>     state
+      ...> end
+      {:exit_success, 'OI'}
+
+      iex> this = self()
+      iex> Brainfuck.Runtime.start_program(",.", fn state -> send this, state end)
+      iex> receive do
+      ...>   state ->
+      ...>     state
+      ...> end
+      {:exit_failure, :no_input}
+
+  """
+  def start_program(program, input \\ nil, callback) do
+    Task.Supervisor.start_child(Brainfuck.TaskSupervisor, fn ->
+      Task.await(Runtime.start_program_linked(program, input)) |> callback.()
+    end)
+  end
+
   defp main(instructions, state) do
     case execute_program(instructions, state) do
       {:ok, state} ->
@@ -105,8 +145,8 @@ defmodule Brainfuck.Runtime do
     {:ok, state}
   end
 
-  defp execute_program(_, _state) do
-    {:exit_failure, :unknown_token}
+  defp execute_program([_unknown_token | rest], state) do
+    execute_program(rest, state)
   end
 
   defp start_loop(loop_body, state) do
