@@ -2,7 +2,11 @@ defmodule Mix.Tasks.Brainfuck do
   use Mix.Task
   alias Brainfuck.Runtime
 
-  @shortdoc "Runs one or more Brainfuck program source files provided as arguments."
+  @shortdoc "Runs one or more Brainfuck program source files"
+
+  def run([]) do
+    Mix.shell.info "Usage: mix brainfuck \"path/to/source/file1\" \"path/to/source/file2\""
+  end
   
   def run(argv) do
     Application.ensure_started(:brainfuck)
